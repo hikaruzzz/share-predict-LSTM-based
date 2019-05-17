@@ -1,10 +1,8 @@
-# share-predict-LSTM-based
-
-# 2019年5月17日更新
+## 2019年5月17日更新
 
 # 基于LSTM 的上证指数预测
 
-## 模型结构
+# 模型结构
   单层LSTM，隐层神经元数量：200，LSTM的输出结果output.shape=（？，200，1），将之传入一个全连接层（单层）并输出一个值（shape=(?,1))。【?可以看成是一个时间序列长度】
   loss函数：mean_squared_error
 
