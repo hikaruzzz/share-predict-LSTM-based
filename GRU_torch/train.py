@@ -11,12 +11,14 @@ from models import GRUNet
 
 is_save = False
 LR = 1e-3
-epoch = 1
+epoch = 10
 time_step = 30
 train_end = 4000
 batchsize = 12
-dims = 2
 input_column=['date','close','volume']
+# input_column=['date','close']
+dims = len(input_column)-1
+
 pred_col=['close']
 path = './data/stock_data.csv'
 # 数据集建立
