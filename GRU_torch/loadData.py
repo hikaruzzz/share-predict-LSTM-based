@@ -1,73 +1,90 @@
 import pandas as pd
-import numpy as np
+import matplotlib.pyplot as plt
 import datetime
 import torch
+import torch.nn as nn
+import numpy as np
+from torch.utils.data import Dataset, DataLoader
 
-def generate_series_n_days(series, time_step, predict_time_step, pred_idx):
-    '''
-    used by dataloader, output pd list
-    :param series: a numpy list of all data on 1 feature
-    :param time_step: time_step
-    :return: ret_y = [length, ]
-
-    '''
-    # time_step coloums and 1 coloums(y)
-    ret_x = []
-    ret_y = []
-    for i in range(time_step):
-        if (predict_time_step == 1):
-            ret_x.append(series[i:-(time_step - i)])
-        else:
-            ret_x.append(series[i:-(time_step + predict_time_step - i)])
-
-    for i in range(predict_time_step):
-        if(predict_time_step==1):
-            ret_y.append(series[time_step:])
-        else:
-            ret_y.append(series[time_step + i : -(predict_time_step-i)])
-    # print(np.array(ret_x).shape, np.array(ret_y).shape)
-    return np.array(ret_x).transpose([1, 0, 2]), np.array(ret_y).transpose([1,0,2])
+from loadData import readData, loadAllData
+from models import GRUNet
 
 
-def readData(path, column=['date','close','volume'],pred_col=['close'],encoding='utf-8', time_step=30, predict_time_step=1, train_split=500):
-    # df.index is date
-    # pred_col should be in column
-    # predict 1 dim
-    raw_data = pd.read_csv(path, usecols=column,encoding = encoding)
-    data, column_name = raw_data[column[1:]].values, raw_data.columns.tolist()
-    pred_idx = column.index(pred_col[0])-1 # predict 1 dim
+path = './data/stock_data.csv'
+input_column=['date','close','volume']
+# input_column=['date','close']
+pred_col=['close']
 
-    mean = np.mean(data, axis=0)  # 数据的均值和方差
-    std = np.std(data, axis=0)
-    norm_data = (data - mean) / std  # 归一化，去量纲
+# path = './data/601238.csv'
+# input_column = ['date','close_front']
+# pred_col=['close_front']
 
-    raw_data.index = list(map(lambda x: datetime.datetime.strptime(x, "%Y/%m/%d"), raw_data['date']))
-    data_train = norm_data[:train_split]
-    data_test = norm_data[train_split - (time_step + predict_time_step):] # 这个要与input ret_x.append 一样大小
-    series_train = generate_series_n_days(data_train, time_step, predict_time_step, pred_idx)
-    series_test = generate_series_n_days(data_test, time_step, predict_time_step, pred_idx)
+out_channel = 1
+predict_mode = 2 # use method 1 or method 2 for predict
+predict_times = 500 # only used when predict_mode==2
+is_save = False
+LR = 1e-3
+epoch = 10
+time_step = 90
+predict_time_step = 90 # 用time_step天 预测未来 predict_time_step 天
+train_end = 2000
+batchsize = 12
+dims = len(input_column)-1
+# 数据集建立
+series_train, series_test, raw_data, std, mean = readData(path, input_column,pred_col, encoding = "gb2312", time_step=time_step,predict_time_step=predict_time_step, train_split=train_end)
+torch.manual_seed(888)
+trainset = loadAllData(series_train)
+trainloader = DataLoader(trainset, batch_size=batchsize, shuffle=True)
+testset = loadAllData(series_test)
+testloader = DataLoader(testset, batch_size=1, shuffle=False)
+print("train data length:",len(trainset))
+print("test data length:",len(testset))
+rnn = GRUNet(dims, out_channel=dims, predict_times_step=predict_time_step)
+optimizer = torch.optim.Adam(rnn.parameters(), lr=LR)  # optimize all cnn parameters
+loss_func = nn.MSELoss()
 
-    return series_train, series_test, raw_data, std[pred_idx], mean[pred_idx]
+for step in range(epoch):
+    for data, label in trainloader:
+        data, label = torch.tensor(data).float(), torch.tensor(label).float()
+        pred = rnn(data)
+        loss = loss_func(pred, label)
+        optimizer.zero_grad()  # clear gradients for this training step
+        loss.backward()  # back propagation, compute gradients
+        optimizer.step()
+    print(step,"loss", loss.detach())
+    if step % 10 and is_save:
+        torch.save(rnn, 'rnn.pkl')
 
-class loadAllData(torch.utils.data.Dataset):
-    def __init__(self, data):
-        # 定义好 image 的路径
-        self.data, self.label = data[0], data[1]
+generate_data_train = []
+generate_data_test = []
 
-    def __getitem__(self, index):
-        return self.data[index], self.label[index]
+test_index = len(raw_data) + train_end
+print("predict mode:",predict_mode)
+if predict_mode==1:
+    # 预测方法 1：用真实的未来值，逐日预测（相当于每日都有真实值更新data
+    predict_times = len(testset)
+    eval_pred = []
+    for i, (data, label) in enumerate(testloader):
+            data, label = torch.tensor(data).float(), torch.tensor(label).float()
+            pred = rnn(data)
+            eval_pred.append(pred[0][0].unsqueeze(dim=-1).detach().numpy()*std + mean)
+else:
+    # 预测方法 2：没有真实未来值，逐日预测，并将其更新到data，进行下一天的预测
+    for data, label in testloader:
+        break
+    data = torch.tensor(data).float()
+    eval_pred = []
+    for i in range(predict_times//predict_time_step):
+        pred = rnn(data) # [b, predict_time_step]
+        eval_pred.append(torch.squeeze(pred,dim=0)[:,0].detach().numpy()*std + mean) # 输出数据恢复正则
+        pred_append = pred.detach()
+        data = torch.cat([data[:,predict_time_step:,:], pred_append], dim=1)
 
-    def __len__(self):
-        return len(self.data)
-
-
-if __name__ == "__main__":
-    root = './data/stock_data.csv'
-    train_data, test_data, idx = readData(root)
-    # train_data.shape = (total num, time_step+1)
-    train_x, train_y = train_data
-    print(train_x.shape)
-
-
-    # tensor = TensorDataset(train_x, train_y)
-    # print(tensor)
+eval_pred = np.concatenate(eval_pred).squeeze() # 输出数据为[[predict_time_step天],[predict_time_step天]...]需要concat成一列
+tag = pred_col[-1]
+date_index = raw_data.index.tolist()
+# plt.plot(date_index[:train_end], generate_data_train, label='real_origin_data(close)')
+plt.plot(date_index[train_end-predict_time_step: train_end-predict_time_step+len(eval_pred)], eval_pred, label='predict_{}_value'.format(tag))
+plt.plot(date_index[:], raw_data[tag][:], label='real_{}_value'.format(tag))
+plt.legend()
+plt.show()
