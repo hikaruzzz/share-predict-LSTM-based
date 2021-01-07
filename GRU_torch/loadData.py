@@ -3,27 +3,32 @@ import numpy as np
 import datetime
 import torch
 
-def generate_series_n_days(series, time_step, pred_idx):
+def generate_series_n_days(series, time_step, predict_time_step, pred_idx):
     '''
     used by dataloader, output pd list
     :param series: a numpy list of all data on 1 feature
     :param time_step: time_step
-    :return:
+    :return: ret_y = [length, ]
 
     '''
     # time_step coloums and 1 coloums(y)
     ret_x = []
+    ret_y = []
+    split_series = len(series)//2
     for i in range(time_step):
-        ret_x.append(series[i:-(time_step - i)])
-    ret_y = series[time_step:, pred_idx]
-    return np.array(ret_x).transpose([1, 0, 2]), np.array(ret_y)
+        ret_x.append(series[i:-(time_step + predict_time_step - i)])
+    for i in range(predict_time_step):
+        ret_y.append(series[time_step + i : -(predict_time_step-i), pred_idx])
+    # ret_y = series[time_step:, pred_idx]
+
+    return np.array(ret_x).transpose([1, 0, 2]), np.array(ret_y).transpose()
 
 
-def readData(path, column=['date','close','volume'],pred_col=['close'], time_step=30, train_split=500):
+def readData(path, column=['date','close','volume'],pred_col=['close'],encoding='utf-8', time_step=30, predict_time_step=1, train_split=500):
     # df.index is date
     # pred_col should be in column
     # predict 1 dim
-    raw_data = pd.read_csv(path, usecols=column)
+    raw_data = pd.read_csv(path, usecols=column,encoding = encoding)
     data, column_name = raw_data[column[1:]].values, raw_data.columns.tolist()
     pred_idx = column.index(pred_col[0])-1 # predict 1 dim
 
@@ -33,8 +38,8 @@ def readData(path, column=['date','close','volume'],pred_col=['close'], time_ste
 
     raw_data.index = list(map(lambda x: datetime.datetime.strptime(x, "%Y/%m/%d"), raw_data['date']))
     data_train, data_test = norm_data[:train_split], norm_data[train_split - time_step:]
-    series_train = generate_series_n_days(data_train, time_step, pred_idx)
-    series_test = generate_series_n_days(data_test, time_step, pred_idx)
+    series_train = generate_series_n_days(data_train, time_step, predict_time_step, pred_idx)
+    series_test = generate_series_n_days(data_test, time_step, predict_time_step, pred_idx)
 
     return series_train, series_test, raw_data, std[pred_idx], mean[pred_idx]
 
