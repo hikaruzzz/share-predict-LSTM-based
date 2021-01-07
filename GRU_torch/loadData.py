@@ -14,13 +14,18 @@ def generate_series_n_days(series, time_step, predict_time_step, pred_idx):
     # time_step coloums and 1 coloums(y)
     ret_x = []
     ret_y = []
-    split_series = len(series)//2
     for i in range(time_step):
-        ret_x.append(series[i:-(time_step + predict_time_step - i)])
-    for i in range(predict_time_step):
-        ret_y.append(series[time_step + i : -(predict_time_step-i), pred_idx])
-    # ret_y = series[time_step:, pred_idx]
+        if (predict_time_step == 1):
+            ret_x.append(series[i:-(time_step - i)])
+        else:
+            ret_x.append(series[i:-(time_step + predict_time_step - i)])
 
+    for i in range(predict_time_step):
+        if(predict_time_step==1):
+            ret_y.append(series[time_step:, pred_idx])
+        else:
+            ret_y.append(series[time_step + i : -(predict_time_step-i), pred_idx])
+    # print(np.array(ret_x).shape, np.array(ret_y).shape)
     return np.array(ret_x).transpose([1, 0, 2]), np.array(ret_y).transpose()
 
 
@@ -37,7 +42,8 @@ def readData(path, column=['date','close','volume'],pred_col=['close'],encoding=
     norm_data = (data - mean) / std  # 归一化，去量纲
 
     raw_data.index = list(map(lambda x: datetime.datetime.strptime(x, "%Y/%m/%d"), raw_data['date']))
-    data_train, data_test = norm_data[:train_split], norm_data[train_split - time_step:]
+    data_train = norm_data[:train_split]
+    data_test = norm_data[train_split - (time_step + predict_time_step):] # 这个要与input ret_x.append 一样大小
     series_train = generate_series_n_days(data_train, time_step, predict_time_step, pred_idx)
     series_test = generate_series_n_days(data_test, time_step, predict_time_step, pred_idx)
 
