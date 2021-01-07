@@ -22,11 +22,11 @@ def generate_series_n_days(series, time_step, predict_time_step, pred_idx):
 
     for i in range(predict_time_step):
         if(predict_time_step==1):
-            ret_y.append(series[time_step:, pred_idx])
+            ret_y.append(series[time_step:])
         else:
-            ret_y.append(series[time_step + i : -(predict_time_step-i), pred_idx])
+            ret_y.append(series[time_step + i : -(predict_time_step-i)])
     # print(np.array(ret_x).shape, np.array(ret_y).shape)
-    return np.array(ret_x).transpose([1, 0, 2]), np.array(ret_y).transpose()
+    return np.array(ret_x).transpose([1, 0, 2]), np.array(ret_y).transpose([1,0,2])
 
 
 def readData(path, column=['date','close','volume'],pred_col=['close'],encoding='utf-8', time_step=30, predict_time_step=1, train_split=500):
