@@ -55,7 +55,7 @@ class loadAllData(torch.utils.data.Dataset):
     def __init__(self, data):
         # 定义好 image 的路径
         self.data, self.label = data[0], data[1]
-
+        # assert data[1] != 0, "error: data should not include zero value"
     def __getitem__(self, index):
         return self.data[index], self.label[index]
 
