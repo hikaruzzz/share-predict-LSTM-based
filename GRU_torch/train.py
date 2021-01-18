@@ -10,23 +10,28 @@ from loadData import readData, loadAllData
 from models import GRUNet
 
 
-path = './data/stock_data.csv'
+# path = './data/stock_data.csv'
 # input_column=['date','close','volume']
-input_column=['date','close']
+# # input_column=['date','close']
+# pred_col=['close']
+
+path = './data/601238.csv'
+input_column = ['date','close','volume']
 pred_col=['close']
 
-# path = './data/601238.csv'
-# input_column = ['date','close_front']
-# pred_col=['close_front']
-
 predict_mode = 2 # use method 1 or method 2 for predict
-predict_times = 500 # only used when predict_mode==2
 is_save = False
 LR = 1e-3
-epoch = 5
-time_step = 60
-predict_time_step = 60 # 用time_step天 预测未来 predict_time_step 天
-train_end = 2500
+epoch = 10
+time_step = 30
+predict_time_step = 30 # 用time_step天 预测未来 predict_time_step 天
+predict_times = 60 # only used when predict_mode==2, total predict times, should be N*predict_time_step
+
+
+# train_end = 400 # train_end==-1 means predict last "predict_time_step" days
+train_end = -31 # train_end==-1 means predict last "predict_time_step" days, if use "-", -31
+is_train = True
+
 batchsize = 12
 dims = len(input_column)-1
 # 数据集建立
@@ -38,53 +43,58 @@ testset = loadAllData(series_test)
 testloader = DataLoader(testset, batch_size=1, shuffle=False)
 print("train data length:",len(trainset))
 print("test data length:",len(testset))
-rnn = GRUNet(dims, predict_times_step=predict_time_step)
+rnn = GRUNet(dims, out_channel=dims, predict_times_step=predict_time_step)
 optimizer = torch.optim.Adam(rnn.parameters(), lr=LR)  # optimize all cnn parameters
 loss_func = nn.MSELoss()
+date_index = raw_data.index.tolist()
+print("total data:",len(date_index))
+assert date_index[1] < date_index[2], "data error: date should be in ascending order"
 
-for step in range(epoch):
-    for data, label in trainloader:
-        data, label = torch.tensor(data).float(), torch.tensor(label).float()
-        pred = rnn(data)
-        loss = loss_func(pred, label)
-        optimizer.zero_grad()  # clear gradients for this training step
-        loss.backward()  # back propagation, compute gradients
-        optimizer.step()
-    print(step,"loss", loss.detach())
-    if step % 10 and is_save:
-        torch.save(rnn, 'rnn.pkl')
+if is_train:
+    for step in range(epoch):
+        for data, label in trainloader:
+            data, label = torch.tensor(data).float(), torch.tensor(label).float()
+            pred = rnn(data)
+            loss = loss_func(pred, label)
+            optimizer.zero_grad()  # clear gradients for this training step
+            loss.backward()  # back propagation, compute gradients
+            optimizer.step()
+        print(step,"loss", loss.detach())
+        if step % 10 and is_save:
+            torch.save(rnn, 'rnn.pkl')
 
 generate_data_train = []
 generate_data_test = []
 
+predict_idx = input_column.index(pred_col[0])-1
 test_index = len(raw_data) + train_end
 print("predict mode:",predict_mode)
+eval_pred = []
 if predict_mode==1:
     # 预测方法 1：用真实的未来值，逐日预测（相当于每日都有真实值更新data
     predict_times = len(testset)
-    eval_pred = []
     for i, (data, label) in enumerate(testloader):
             data, label = torch.tensor(data).float(), torch.tensor(label).float()
             pred = rnn(data)
-            eval_pred.append(pred[0][0].unsqueeze(dim=-1).detach().numpy()*std + mean)
-
+            eval_app = pred[0][0].detach().numpy()*std + mean
+            eval_pred.append(eval_app[predict_idx])
 else:
     # 预测方法 2：没有真实未来值，逐日预测，并将其更新到data，进行下一天的预测
+    assert len(testloader) != 0, "error: nums of testloader should > 0"
     for data, label in testloader:
+        data = torch.tensor(data).float()
         break
-    data = torch.tensor(data).float()
-    eval_pred = []
-    assert dims == 1, "features dim should == 1!"
     for i in range(predict_times//predict_time_step):
         pred = rnn(data) # [b, predict_time_step]
-        eval_pred.append(torch.squeeze(pred).detach().numpy()*std + mean) # 输出数据恢复正则
-        pred_append = pred.detach().unsqueeze(dim=-1)
+        eval_pred.append(torch.squeeze(pred,dim=0)[:,predict_idx].detach().numpy()*std + mean) # 输出数据恢复正则
+        pred_append = pred.detach()
         data = torch.cat([data[:,predict_time_step:,:], pred_append], dim=1)
-
-eval_pred = np.concatenate(eval_pred).squeeze()# 输出数据为[[predict_time_step天],[predict_time_step天]...]需要concat成一列
+    eval_pred = np.concatenate(eval_pred).squeeze() # 输出数据为[[predict_time_step天],[predict_time_step天]...]需要concat成一列
 tag = pred_col[-1]
-date_index = raw_data.index.tolist()
+print(date_index[train_end])
+print(len(eval_pred))
 # plt.plot(date_index[:train_end], generate_data_train, label='real_origin_data(close)')
+assert train_end<0 and train_end-predict_time_step+len(eval_pred)<0, "len(eval_pred) over large, abs(train_end-predict_time_step) should > preidct_times"
 plt.plot(date_index[train_end-predict_time_step: train_end-predict_time_step+len(eval_pred)], eval_pred, label='predict_{}_value'.format(tag))
 plt.plot(date_index[:], raw_data[tag][:], label='real_{}_value'.format(tag))
 plt.legend()
